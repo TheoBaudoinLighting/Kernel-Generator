@@ -1,0 +1,38 @@
+# Build directories
+build/
+out/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# IDE and editor state
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Native build outputs
+*.obj
+*.o
+*.lo
+*.a
+*.lib
+*.dll
+*.dylib
+*.so
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# Generated previews
+*.tga
+*.ppm
+*.pgm
+*.pbm
