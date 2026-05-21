@@ -7,8 +7,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <vector>
 
 static const float PI_F  = 3.14159265358979323846f;
 static const float TAU_F = 6.28318530717958647692f;
@@ -232,31 +235,31 @@ struct BokehSample
 
 struct BokehKernel
 {
-    int w, h;
-    Color* values;
-    float* pmf;
-    float* rowCdf;
-    float* colCdf;
-    float totalEnergy;
-    float normScale;
-    BokehQuery query;
+    int w = 0, h = 0;
+    std::vector<Color> values;
+    std::vector<float> pmf;
+    std::vector<float> rowCdf;
+    std::vector<float> colCdf;
+    float totalEnergy = 0.0f;
+    float normScale = 1.0f;
+    BokehQuery query = {};
 };
 
 struct KernelBank
 {
-    int fieldResX, fieldResY;
-    int defocusRes;
-    int apertureRes;
-    int focalRes;
+    int fieldResX = 0, fieldResY = 0;
+    int defocusRes = 0;
+    int apertureRes = 0;
+    int focalRes = 0;
 
-    float fieldMinX, fieldMaxX;
-    float fieldMinY, fieldMaxY;
-    float defocusMin, defocusMax;
-    float apertureMin, apertureMax;
-    float focalMin, focalMax;
+    float fieldMinX = 0.0f, fieldMaxX = 0.0f;
+    float fieldMinY = 0.0f, fieldMaxY = 0.0f;
+    float defocusMin = 0.0f, defocusMax = 0.0f;
+    float apertureMin = 0.0f, apertureMax = 0.0f;
+    float focalMin = 0.0f, focalMax = 0.0f;
 
-    int kernelW, kernelH;
-    BokehKernel* kernels;
+    int kernelW = 0, kernelH = 0;
+    std::vector<BokehKernel> kernels;
 };
 
 static void randomPointInDisk(Rng& rng, float maxR, float& x, float& y)
@@ -673,30 +676,32 @@ static Color evalBokeh(const BokehQuery& q, const LensModel& lens)
 
 static void initKernel(BokehKernel& k)
 {
-    k.w = 0; k.h = 0;
-    k.values = 0;
-    k.pmf = 0;
-    k.rowCdf = 0;
-    k.colCdf = 0;
-    k.totalEnergy = 0.0f;
-    k.normScale = 1.0f;
-    std::memset(&k.query, 0, sizeof(BokehQuery));
+    k = BokehKernel();
 }
 
 static void destroyKernel(BokehKernel& k)
 {
-    delete[] k.values;  k.values = 0;
-    delete[] k.pmf;     k.pmf = 0;
-    delete[] k.rowCdf;  k.rowCdf = 0;
-    delete[] k.colCdf;  k.colCdf = 0;
-    k.w = k.h = 0;
-    k.totalEnergy = 0.0f;
-    k.normScale = 1.0f;
+    k = BokehKernel();
 }
 
-static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h, BokehKernel& out)
+static bool checkedPixelCount(int w, int h, size_t& count)
+{
+    if (w <= 0 || h <= 0) return false;
+
+    size_t sw = (size_t)w;
+    size_t sh = (size_t)h;
+    if (sw > std::numeric_limits<size_t>::max() / sh) return false;
+
+    count = sw * sh;
+    return true;
+}
+
+static bool buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h, BokehKernel& out)
 {
     destroyKernel(out);
+
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(w, h, pixelCount)) return false;
 
     BokehQuery localQ = q;
     if (localQ.frameScale <= 0.01f)
@@ -705,10 +710,19 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
     out.w = w;
     out.h = h;
     out.query = localQ;
-    out.values = new Color[(size_t)w * (size_t)h];
-    out.pmf = new float[(size_t)w * (size_t)h];
-    out.rowCdf = new float[(size_t)h];
-    out.colCdf = new float[(size_t)w * (size_t)h];
+
+    try
+    {
+        out.values.assign(pixelCount, Color{0, 0, 0, 0});
+        out.pmf.assign(pixelCount, 0.0f);
+        out.rowCdf.assign((size_t)h, 0.0f);
+        out.colCdf.assign(pixelCount, 0.0f);
+    }
+    catch (...)
+    {
+        destroyKernel(out);
+        return false;
+    }
 
     double energy = 0.0;
     for (int y = 0; y < h; ++y)
@@ -719,17 +733,18 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
             p.u = ((float)x + 0.5f) / (float)w;
             p.v = ((float)y + 0.5f) / (float)h;
             Color c = evalBokeh(p, lens);
-            out.values[(size_t)y * (size_t)w + (size_t)x] = c;
+            size_t idx = (size_t)y * (size_t)w + (size_t)x;
+            out.values[idx] = c;
             float e = luminance(c.r, c.g, c.b);
-            out.pmf[(size_t)y * (size_t)w + (size_t)x] = e;
+            out.pmf[idx] = e;
             energy += (double)e;
         }
     }
 
     out.totalEnergy = (float)energy;
-    out.normScale = energy > 1e-12 ? (float)((double)(w * h) / energy) : 1.0f;
+    out.normScale = energy > 1e-12 ? (float)((double)pixelCount / energy) : 1.0f;
 
-    for (int i = 0; i < w * h; ++i)
+    for (size_t i = 0; i < pixelCount; ++i)
     {
         out.values[i].r *= out.normScale;
         out.values[i].g *= out.normScale;
@@ -738,17 +753,17 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
     }
 
     energy = 0.0;
-    for (int i = 0; i < w * h; ++i) energy += out.pmf[i];
+    for (size_t i = 0; i < pixelCount; ++i) energy += out.pmf[i];
     out.totalEnergy = (float)energy;
 
     if (out.totalEnergy > 1e-12f)
     {
-        for (int i = 0; i < w * h; ++i) out.pmf[i] /= out.totalEnergy;
+        for (size_t i = 0; i < pixelCount; ++i) out.pmf[i] /= out.totalEnergy;
     }
     else
     {
-        float uniform = 1.0f / (float)(w * h);
-        for (int i = 0; i < w * h; ++i) out.pmf[i] = uniform;
+        float uniform = 1.0f / (float)pixelCount;
+        for (size_t i = 0; i < pixelCount; ++i) out.pmf[i] = uniform;
     }
 
     float accumRows = 0.0f;
@@ -777,6 +792,7 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
 
     if (h > 0) out.rowCdf[h - 1] = 1.0f;
     for (int y = 0; y < h; ++y) out.colCdf[(size_t)y * (size_t)w + (size_t)(w - 1)] = 1.0f;
+    return true;
 }
 
 static int cdfLowerBound(const float* cdf, int count, float xi)
@@ -794,11 +810,11 @@ static int cdfLowerBound(const float* cdf, int count, float xi)
 
 static float pdfBokeh(float u, float v, const BokehKernel& kernel)
 {
-    if (!kernel.pmf || kernel.w <= 0 || kernel.h <= 0) return 0.0f;
+    if (kernel.pmf.empty() || kernel.w <= 0 || kernel.h <= 0) return 0.0f;
     int x = (int)(clampf(u, 0.0f, 0.999999f) * (float)kernel.w);
     int y = (int)(clampf(v, 0.0f, 0.999999f) * (float)kernel.h);
     float pmf = kernel.pmf[(size_t)y * (size_t)kernel.w + (size_t)x];
-    return pmf * (float)(kernel.w * kernel.h);
+    return pmf * (float)((double)kernel.w * (double)kernel.h);
 }
 
 static BokehSample sampleBokeh(float xi0, float xi1, const BokehKernel& kernel)
@@ -808,14 +824,14 @@ static BokehSample sampleBokeh(float xi0, float xi1, const BokehKernel& kernel)
     s.pdf = 0.0f;
     s.value = {0, 0, 0, 0};
 
-    if (!kernel.pmf || !kernel.rowCdf || !kernel.colCdf || kernel.w <= 0 || kernel.h <= 0)
+    if (kernel.pmf.empty() || kernel.rowCdf.empty() || kernel.colCdf.empty() || kernel.w <= 0 || kernel.h <= 0)
         return s;
 
     xi0 = saturate(xi0);
     xi1 = saturate(xi1);
 
-    int row = cdfLowerBound(kernel.rowCdf, kernel.h, xi1);
-    const float* rowCols = kernel.colCdf + (size_t)row * (size_t)kernel.w;
+    int row = cdfLowerBound(kernel.rowCdf.data(), kernel.h, xi1);
+    const float* rowCols = kernel.colCdf.data() + (size_t)row * (size_t)kernel.w;
     int col = cdfLowerBound(rowCols, kernel.w, xi0);
 
     s.u = ((float)col + 0.5f) / (float)kernel.w;
@@ -837,19 +853,12 @@ static size_t kernelBankFlatIndex(const KernelBank& bank, int fx, int fy, int d,
 
 static void initKernelBank(KernelBank& bank)
 {
-    std::memset(&bank, 0, sizeof(KernelBank));
+    bank = KernelBank();
 }
 
 static void destroyKernelBank(KernelBank& bank)
 {
-    if (bank.kernels)
-    {
-        size_t count = (size_t)bank.fieldResX * (size_t)bank.fieldResY * (size_t)bank.defocusRes * (size_t)bank.apertureRes * (size_t)bank.focalRes;
-        for (size_t i = 0; i < count; ++i) destroyKernel(bank.kernels[i]);
-        delete[] bank.kernels;
-        bank.kernels = 0;
-    }
-    std::memset(&bank, 0, sizeof(KernelBank));
+    bank = KernelBank();
 }
 
 static float sampleGridValue(int i, int n, float a, float b)
@@ -858,19 +867,48 @@ static float sampleGridValue(int i, int n, float a, float b)
     return lerpf(a, b, (float)i / (float)(n - 1));
 }
 
-static void buildKernelBank(const LensModel& lens, KernelBank& bank)
+static bool checkedKernelBankCount(const KernelBank& bank, size_t& count)
 {
-    if (bank.kernels)
+    if (bank.fieldResX <= 0 || bank.fieldResY <= 0 ||
+        bank.defocusRes <= 0 || bank.apertureRes <= 0 || bank.focalRes <= 0)
+        return false;
+
+    size_t values[5] = {
+        (size_t)bank.fieldResX,
+        (size_t)bank.fieldResY,
+        (size_t)bank.defocusRes,
+        (size_t)bank.apertureRes,
+        (size_t)bank.focalRes
+    };
+
+    count = 1;
+    for (int i = 0; i < 5; ++i)
     {
-        size_t oldCount = (size_t)bank.fieldResX * (size_t)bank.fieldResY * (size_t)bank.defocusRes * (size_t)bank.apertureRes * (size_t)bank.focalRes;
-        for (size_t i = 0; i < oldCount; ++i) destroyKernel(bank.kernels[i]);
-        delete[] bank.kernels;
-        bank.kernels = 0;
+        if (count > std::numeric_limits<size_t>::max() / values[i]) return false;
+        count *= values[i];
     }
 
-    size_t count = (size_t)bank.fieldResX * (size_t)bank.fieldResY * (size_t)bank.defocusRes * (size_t)bank.apertureRes * (size_t)bank.focalRes;
-    bank.kernels = new BokehKernel[count];
-    for (size_t i = 0; i < count; ++i) initKernel(bank.kernels[i]);
+    return true;
+}
+
+static bool buildKernelBank(const LensModel& lens, KernelBank& bank)
+{
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(bank.kernelW, bank.kernelH, pixelCount)) return false;
+
+    size_t count = 0;
+    if (!checkedKernelBankCount(bank, count)) return false;
+
+    bank.kernels.clear();
+    try
+    {
+        bank.kernels.resize(count);
+    }
+    catch (...)
+    {
+        bank.kernels.clear();
+        return false;
+    }
 
     for (int fx = 0; fx < bank.fieldResX; ++fx)
     for (int fy = 0; fy < bank.fieldResY; ++fy)
@@ -889,8 +927,14 @@ static void buildKernelBank(const LensModel& lens, KernelBank& bank)
         q.frameScale = 0.0f;
 
         size_t idx = kernelBankFlatIndex(bank, fx, fy, d, a, f);
-        buildKernel(lens, q, bank.kernelW, bank.kernelH, bank.kernels[idx]);
+        if (!buildKernel(lens, q, bank.kernelW, bank.kernelH, bank.kernels[idx]))
+        {
+            bank.kernels.clear();
+            return false;
+        }
     }
+
+    return true;
 }
 
 static int nearestGridIndex(float x, int n, float a, float b)
@@ -903,14 +947,18 @@ static int nearestGridIndex(float x, int n, float a, float b)
     return i;
 }
 
-static const BokehKernel& fetchKernel(const KernelBank& bank, float fieldX, float fieldY, float defocus, float aperture, float focal)
+static const BokehKernel* fetchKernel(const KernelBank& bank, float fieldX, float fieldY, float defocus, float aperture, float focal)
 {
+    if (bank.kernels.empty()) return 0;
+
     int fx = nearestGridIndex(fieldX, bank.fieldResX, bank.fieldMinX, bank.fieldMaxX);
     int fy = nearestGridIndex(fieldY, bank.fieldResY, bank.fieldMinY, bank.fieldMaxY);
     int d  = nearestGridIndex(defocus, bank.defocusRes, bank.defocusMin, bank.defocusMax);
     int a  = nearestGridIndex(aperture, bank.apertureRes, bank.apertureMin, bank.apertureMax);
     int f  = nearestGridIndex(focal, bank.focalRes, bank.focalMin, bank.focalMax);
-    return bank.kernels[kernelBankFlatIndex(bank, fx, fy, d, a, f)];
+    size_t idx = kernelBankFlatIndex(bank, fx, fy, d, a, f);
+    if (idx >= bank.kernels.size()) return 0;
+    return &bank.kernels[idx];
 }
 
 static unsigned char toByte(float linear)
@@ -924,6 +972,14 @@ static unsigned char toByte(float linear)
 
 static int writeTGA_RGBA(const char* path, const unsigned char* bgra, int w, int h)
 {
+    if (!path || !path[0] || !bgra) return 0;
+    if (w > 65535 || h > 65535) return 0;
+
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(w, h, pixelCount)) return 0;
+    if (pixelCount > std::numeric_limits<size_t>::max() / 4u) return 0;
+
+    size_t byteCount = pixelCount * 4u;
     FILE* f = std::fopen(path, "wb");
     if (!f) return 0;
 
@@ -936,16 +992,32 @@ static int writeTGA_RGBA(const char* path, const unsigned char* bgra, int w, int
     header[16] = 32;
     header[17] = 0x20 | 8;
 
-    std::fwrite(header, 1, 18, f);
-    std::fwrite(bgra, 1, (size_t)w * (size_t)h * 4u, f);
-    std::fclose(f);
-    return 1;
+    int ok = std::fwrite(header, 1, 18, f) == 18;
+    ok = ok && std::fwrite(bgra, 1, byteCount, f) == byteCount;
+    int closeOk = std::fclose(f) == 0;
+    return ok && closeOk;
 }
 
 static int saveKernelPreviewTGA(const char* path, const BokehKernel& kernel)
 {
-    if (!kernel.values || kernel.w <= 0 || kernel.h <= 0) return 0;
-    unsigned char* img = new unsigned char[(size_t)kernel.w * (size_t)kernel.h * 4u];
+    if (kernel.values.empty() || kernel.w <= 0 || kernel.h <= 0) return 0;
+    if (kernel.w > 65535 || kernel.h > 65535) return 0;
+
+    size_t pixelCount = 0;
+    if (!checkedPixelCount(kernel.w, kernel.h, pixelCount)) return 0;
+    if (pixelCount > std::numeric_limits<size_t>::max() / 4u) return 0;
+    if (kernel.values.size() < pixelCount) return 0;
+
+    std::vector<unsigned char> img;
+    try
+    {
+        img.assign(pixelCount * 4u, 0);
+    }
+    catch (...)
+    {
+        return 0;
+    }
+
     for (int y = 0; y < kernel.h; ++y)
     {
         for (int x = 0; x < kernel.w; ++x)
@@ -958,17 +1030,62 @@ static int saveKernelPreviewTGA(const char* path, const BokehKernel& kernel)
             img[p + 3] = (unsigned char)(saturate(c.a) * 255.0f + 0.5f);
         }
     }
-    int ok = writeTGA_RGBA(path, img, kernel.w, kernel.h);
-    delete[] img;
-    return ok;
+    return writeTGA_RGBA(path, img.data(), kernel.w, kernel.h);
+}
+
+static bool parseUint32Arg(const char* text, uint32_t& value)
+{
+    if (!text || !text[0]) return false;
+
+    errno = 0;
+    char* end = 0;
+    unsigned long parsed = std::strtoul(text, &end, 10);
+    if (errno != 0 || end == text || *end != 0) return false;
+    if (parsed > (unsigned long)std::numeric_limits<uint32_t>::max()) return false;
+
+    value = (uint32_t)parsed;
+    return true;
+}
+
+static bool parsePositiveIntArg(const char* text, int& value)
+{
+    if (!text || !text[0]) return false;
+
+    errno = 0;
+    char* end = 0;
+    long parsed = std::strtol(text, &end, 10);
+    if (errno != 0 || end == text || *end != 0) return false;
+    if (parsed <= 0 || parsed > (long)std::numeric_limits<int>::max()) return false;
+
+    value = (int)parsed;
+    return true;
+}
+
+static void printUsage(const char* exe)
+{
+    std::fprintf(stderr, "Usage: %s [seed] [width] [height] [output.tga]\n", exe ? exe : "kernel_generator");
 }
 
 int main(int argc, char** argv)
 {
-    uint32_t seed     = argc > 1 ? (uint32_t)std::strtoul(argv[1], 0, 10) : 1337u;
-    int kernelW       = argc > 2 ? std::atoi(argv[2]) : 512;
-    int kernelH       = argc > 3 ? std::atoi(argv[3]) : 512;
-    const char* outTga= argc > 4 ? argv[4] : "bokeh_kernel_system.tga";
+    if (argc > 5)
+    {
+        printUsage(argv[0]);
+        return 2;
+    }
+
+    uint32_t seed = 1337u;
+    int kernelW = 512;
+    int kernelH = 512;
+    const char* outTga = argc > 4 ? argv[4] : "bokeh_kernel_system.tga";
+
+    if ((argc > 1 && !parseUint32Arg(argv[1], seed)) ||
+        (argc > 2 && !parsePositiveIntArg(argv[2], kernelW)) ||
+        (argc > 3 && !parsePositiveIntArg(argv[3], kernelH)))
+    {
+        printUsage(argv[0]);
+        return 2;
+    }
 
     if (kernelW < 8) kernelW = 8;
     if (kernelH < 8) kernelH = 8;
@@ -986,47 +1103,25 @@ int main(int argc, char** argv)
 
     BokehKernel kernel;
     initKernel(kernel);
-    buildKernel(lens, q, kernelW, kernelH, kernel);
-
-    if (!saveKernelPreviewTGA(outTga, kernel))
+    if (!buildKernel(lens, q, kernelW, kernelH, kernel))
     {
-        std::fprintf(stderr, "Impossible d'ecrire %s\n", outTga);
-        destroyKernel(kernel);
+        std::fprintf(stderr, "Failed to build kernel %dx%d\n", kernelW, kernelH);
         return 1;
     }
 
-    BokehSample s = sampleBokeh(0.37f, 0.81f, kernel);
+    if (!saveKernelPreviewTGA(outTga, kernel))
+    {
+        std::fprintf(stderr, "Failed to write %s\n", outTga);
+        return 1;
+    }
+
     float pe = pdfBokeh(0.50f, 0.50f, kernel);
 
-    std::printf("Kernel direct OK -> %s\n", outTga);
-    std::printf("Direct query: field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f\n",
-                q.fieldX, q.fieldY, q.defocus, q.aperture, q.focal);
-    std::printf("Sample: uv=(%.6f, %.6f) pdf=%.6f value=(%.6f, %.6f, %.6f)\n",
-                s.u, s.v, s.pdf, s.value.r, s.value.g, s.value.b);
-    std::printf("Eval/pdf: pdf(center)=%.6f totalEnergy=%.6f normScale=%.6f\n",
+    std::printf("Kernel OK -> %s\n", outTga);
+    std::printf("Resolution: %dx%d\n", kernel.w, kernel.h);
+    std::printf("Query: field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f frameScale=%.3f\n",
+                q.fieldX, q.fieldY, q.defocus, q.aperture, q.focal, kernel.query.frameScale);
+    std::printf("Metrics: pdf(center)=%.6f totalEnergy=%.6f normScale=%.6f\n",
                 pe, kernel.totalEnergy, kernel.normScale);
-
-    KernelBank bank;
-    initKernelBank(bank);
-    bank.fieldResX = 3; bank.fieldResY = 3;
-    bank.defocusRes = 3;
-    bank.apertureRes = 2;
-    bank.focalRes = 2;
-    bank.fieldMinX = -1.0f; bank.fieldMaxX = 1.0f;
-    bank.fieldMinY = -1.0f; bank.fieldMaxY = 1.0f;
-    bank.defocusMin = -1.0f; bank.defocusMax = 1.0f;
-    bank.apertureMin = 0.70f; bank.apertureMax = 1.00f;
-    bank.focalMin = 0.60f; bank.focalMax = 1.20f;
-    bank.kernelW = 128; bank.kernelH = 128;
-
-    buildKernelBank(lens, bank);
-    const BokehKernel& cached = fetchKernel(bank, 0.62f, -0.18f, 0.80f, 0.92f, 0.88f);
-    std::printf("Bank: fetched kernel %dx%d for nearest params -> field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f\n",
-                cached.w, cached.h,
-                cached.query.fieldX, cached.query.fieldY, cached.query.defocus,
-                cached.query.aperture, cached.query.focal);
-
-    destroyKernelBank(bank);
-    destroyKernel(kernel);
     return 0;
 }
