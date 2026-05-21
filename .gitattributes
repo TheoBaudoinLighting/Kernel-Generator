@@ -8,6 +8,7 @@
 *.json text eol=lf
 
 *.tga binary
+*.png binary
 *.ppm binary
 *.pgm binary
 *.pbm binary

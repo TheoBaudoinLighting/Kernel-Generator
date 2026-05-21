@@ -14,6 +14,18 @@ The program builds a lens model from a seed, evaluates aperture shape, field pos
 - Probability tables for direct kernel sampling.
 - Optional kernel bank generation across field, defocus, aperture and focal ranges.
 
+## Examples
+
+Example kernels produced with the default field, defocus, aperture and focal settings.
+
+| Seed 1337 | Seed 2401 |
+| --- | --- |
+| ![Bokeh kernel seed 1337](docs/examples/bokeh_seed_1337.png) | ![Bokeh kernel seed 2401](docs/examples/bokeh_seed_2401.png) |
+
+| Seed 4099 | Seed 8191 |
+| --- | --- |
+| ![Bokeh kernel seed 4099](docs/examples/bokeh_seed_4099.png) | ![Bokeh kernel seed 8191](docs/examples/bokeh_seed_8191.png) |
+
 ## Requirements
 
 - CMake 3.20 or newer.
@@ -61,6 +73,7 @@ Defaults:
 ├── bokeh_kernel_system.cpp
 ├── CMakeLists.txt
 ├── CMakePresets.json
+├── docs/
 ├── .gitattributes
 ├── .gitignore
 └── README.md
