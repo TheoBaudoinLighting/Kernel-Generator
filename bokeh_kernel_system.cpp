@@ -959,19 +959,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Démo sample/pdf.
     BokehSample s = sampleBokeh(0.37f, 0.81f, kernel);
     float pe = pdfBokeh(0.50f, 0.50f, kernel);
 
     std::printf("Kernel direct OK -> %s\n", outTga);
     std::printf("Direct query: field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f\n",
                 q.fieldX, q.fieldY, q.defocus, q.aperture, q.focal);
-    std::printf("Sample demo: uv=(%.6f, %.6f) pdf=%.6f value=(%.6f, %.6f, %.6f)\n",
+    std::printf("Sample: uv=(%.6f, %.6f) pdf=%.6f value=(%.6f, %.6f, %.6f)\n",
                 s.u, s.v, s.pdf, s.value.r, s.value.g, s.value.b);
-    std::printf("Eval/pdf demo: pdf(center)=%.6f totalEnergy=%.6f normScale=%.6f\n",
+    std::printf("Eval/pdf: pdf(center)=%.6f totalEnergy=%.6f normScale=%.6f\n",
                 pe, kernel.totalEnergy, kernel.normScale);
 
-    // Démo bank minimale.
     KernelBank bank;
     initKernelBank(bank);
     bank.fieldResX = 3; bank.fieldResY = 3;
@@ -987,7 +985,7 @@ int main(int argc, char** argv)
 
     buildKernelBank(lens, bank);
     const BokehKernel& cached = fetchKernel(bank, 0.62f, -0.18f, 0.80f, 0.92f, 0.88f);
-    std::printf("Bank demo: fetched kernel %dx%d for nearest params -> field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f\n",
+    std::printf("Bank: fetched kernel %dx%d for nearest params -> field=(%.3f, %.3f) defocus=%.3f aperture=%.3f focal=%.3f\n",
                 cached.w, cached.h,
                 cached.query.fieldX, cached.query.fieldY, cached.query.defocus,
                 cached.query.aperture, cached.query.focal);
