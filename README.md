@@ -38,13 +38,7 @@ cmake --build build/release --config Release
 ## Run
 
 ```powershell
-.\build\release\Release\kernel_generator.exe 1337 512 512 bokeh_kernel_system.tga
-```
-
-For single-configuration generators, the executable may be placed directly under `build/release`:
-
-```powershell
-.\build\release\kernel_generator.exe 1337 512 512 bokeh_kernel_system.tga
+.\build\release\bin\kernel_generator.exe 1337 512 512 bokeh_kernel_system.tga
 ```
 
 Arguments:
