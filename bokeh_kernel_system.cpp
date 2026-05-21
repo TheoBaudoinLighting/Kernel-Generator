@@ -1061,14 +1061,29 @@ static bool parsePositiveIntArg(const char* text, int& value)
     return true;
 }
 
+static bool parseFloatArg(const char* text, float& value)
+{
+    if (!text || !text[0]) return false;
+
+    errno = 0;
+    char* end = 0;
+    float parsed = std::strtof(text, &end);
+    if (errno != 0 || end == text || *end != 0) return false;
+    if (!std::isfinite(parsed)) return false;
+
+    value = parsed;
+    return true;
+}
+
 static void printUsage(const char* exe)
 {
-    std::fprintf(stderr, "Usage: %s [seed] [width] [height] [output.tga]\n", exe ? exe : "kernel_generator");
+    std::fprintf(stderr, "Usage: %s [seed] [width] [height] [output.tga] [fieldX] [fieldY] [defocus] [aperture] [focal]\n",
+                 exe ? exe : "kernel_generator");
 }
 
 int main(int argc, char** argv)
 {
-    if (argc > 5)
+    if (argc > 10)
     {
         printUsage(argv[0]);
         return 2;
@@ -1078,10 +1093,23 @@ int main(int argc, char** argv)
     int kernelW = 512;
     int kernelH = 512;
     const char* outTga = argc > 4 ? argv[4] : "bokeh_kernel_system.tga";
+    BokehQuery q;
+    q.u = 0.5f; q.v = 0.5f;
+    q.fieldX = 0.58f;
+    q.fieldY = -0.22f;
+    q.defocus = 0.75f;
+    q.aperture = 0.95f;
+    q.focal = 0.85f;
+    q.frameScale = 0.0f;
 
     if ((argc > 1 && !parseUint32Arg(argv[1], seed)) ||
         (argc > 2 && !parsePositiveIntArg(argv[2], kernelW)) ||
-        (argc > 3 && !parsePositiveIntArg(argv[3], kernelH)))
+        (argc > 3 && !parsePositiveIntArg(argv[3], kernelH)) ||
+        (argc > 5 && !parseFloatArg(argv[5], q.fieldX)) ||
+        (argc > 6 && !parseFloatArg(argv[6], q.fieldY)) ||
+        (argc > 7 && !parseFloatArg(argv[7], q.defocus)) ||
+        (argc > 8 && !parseFloatArg(argv[8], q.aperture)) ||
+        (argc > 9 && !parseFloatArg(argv[9], q.focal)))
     {
         printUsage(argv[0]);
         return 2;
@@ -1091,15 +1119,6 @@ int main(int argc, char** argv)
     if (kernelH < 8) kernelH = 8;
 
     LensModel lens = makeLensModel(seed);
-
-    BokehQuery q;
-    q.u = 0.5f; q.v = 0.5f;
-    q.fieldX = 0.58f;
-    q.fieldY = -0.22f;
-    q.defocus = 0.75f;
-    q.aperture = 0.95f;
-    q.focal = 0.85f;
-    q.frameScale = 0.0f;
 
     BokehKernel kernel;
     initKernel(kernel);

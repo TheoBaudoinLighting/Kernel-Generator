@@ -16,15 +16,14 @@ The program builds a lens model from a seed, evaluates aperture shape, field pos
 
 ## Examples
 
-Example kernels produced with the default field, defocus, aperture and focal settings.
+Each row uses one fixed optical setup. The columns change only the seed.
 
-| Seed 1337 | Seed 2401 |
-| --- | --- |
-| ![Bokeh kernel seed 1337](docs/examples/bokeh_seed_1337.png) | ![Bokeh kernel seed 2401](docs/examples/bokeh_seed_2401.png) |
-
-| Seed 4099 | Seed 8191 |
-| --- | --- |
-| ![Bokeh kernel seed 4099](docs/examples/bokeh_seed_4099.png) | ![Bokeh kernel seed 8191](docs/examples/bokeh_seed_8191.png) |
+| Setup | Seed A | Seed B | Seed C |
+| --- | --- | --- | --- |
+| Balanced off-axis<br>`field=(0.58, -0.22)`<br>`defocus=0.75 aperture=0.95 focal=0.85` | ![Balanced bokeh kernel seed 1337](docs/examples/balanced_seed_1337.png) | ![Balanced bokeh kernel seed 2401](docs/examples/balanced_seed_2401.png) | ![Balanced bokeh kernel seed 4099](docs/examples/balanced_seed_4099.png) |
+| Centered soft focus<br>`field=(0.00, 0.00)`<br>`defocus=0.45 aperture=1.00 focal=1.20` | ![Centered bokeh kernel seed 5189](docs/examples/center_seed_5189.png) | ![Centered bokeh kernel seed 7307](docs/examples/center_seed_7307.png) | ![Centered bokeh kernel seed 9011](docs/examples/center_seed_9011.png) |
+| Edge cat-eye<br>`field=(1.00, 0.60)`<br>`defocus=1.05 aperture=0.72 focal=0.65` | ![Edge bokeh kernel seed 1123](docs/examples/edge_seed_1123.png) | ![Edge bokeh kernel seed 6827](docs/examples/edge_seed_6827.png) | ![Edge bokeh kernel seed 9721](docs/examples/edge_seed_9721.png) |
+| Heavy reverse defocus<br>`field=(-0.85, 0.35)`<br>`defocus=-1.20 aperture=0.62 focal=0.55` | ![Heavy bokeh kernel seed 2027](docs/examples/heavy_seed_2027.png) | ![Heavy bokeh kernel seed 7561](docs/examples/heavy_seed_7561.png) | ![Heavy bokeh kernel seed 9901](docs/examples/heavy_seed_9901.png) |
 
 ## Requirements
 
@@ -56,7 +55,7 @@ cmake --build build/release --config Release
 Arguments:
 
 ```text
-kernel_generator [seed] [width] [height] [output.tga]
+kernel_generator [seed] [width] [height] [output.tga] [fieldX] [fieldY] [defocus] [aperture] [focal]
 ```
 
 Defaults:
@@ -65,6 +64,11 @@ Defaults:
 - `width`: `512`
 - `height`: `512`
 - `output.tga`: `bokeh_kernel_system.tga`
+- `fieldX`: `0.58`
+- `fieldY`: `-0.22`
+- `defocus`: `0.75`
+- `aperture`: `0.95`
+- `focal`: `0.85`
 
 ## Repository Layout
 
