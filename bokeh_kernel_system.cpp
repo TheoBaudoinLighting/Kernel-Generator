@@ -1,3 +1,9 @@
+/*
+    Kernel Generator
+    Author: Theo Baudoin
+    Copyright (c) 2026 Theo Baudoin. All rights reserved.
+*/
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -188,11 +194,12 @@ struct LensModel
 
 struct BokehQuery
 {
-    float u, v;             // coordonnée kernel [0,1]
-    float fieldX, fieldY;   // position image / capteur [-1,1]
-    float defocus;          // intensité + signe
-    float aperture;         // ouverture relative > 0
-    float focal;            // focale normalisée > 0
+    float u, v;
+    float fieldX, fieldY;
+    float defocus;
+    float aperture;
+    float focal;
+    float frameScale;
 };
 
 struct LocalLensState
@@ -226,10 +233,10 @@ struct BokehSample
 struct BokehKernel
 {
     int w, h;
-    Color* values;   // taille w*h
-    float* pmf;      // probabilité discrète par pixel, somme = 1
-    float* rowCdf;   // taille h
-    float* colCdf;   // taille w*h, CDF conditionnelle par ligne
+    Color* values;
+    float* pmf;
+    float* rowCdf;
+    float* colCdf;
     float totalEnergy;
     float normScale;
     BokehQuery query;
@@ -438,6 +445,34 @@ static float apertureRadiusProcedural(float theta, float spectralT, const LensMo
     return clampf(radial, 0.40f, 1.50f);
 }
 
+static float estimateFrameScale(const LensModel& lens, const BokehQuery& q)
+{
+    LocalLensState ls = buildLocalLensState(lens, q);
+
+    float maxRadius = 0.0f;
+    const int angleCount = 96;
+    const int spectralCount = 5;
+
+    for (int si = 0; si < spectralCount; ++si)
+    {
+        float lambda = lerpf(430.0f, 680.0f, (float)si / (float)(spectralCount - 1));
+        float spectralT = (lambda - 555.0f) / 125.0f;
+
+        for (int i = 0; i < angleCount; ++i)
+        {
+            float theta = ((float)i / (float)angleCount) * TAU_F;
+            float r = apertureRadiusProcedural(theta, spectralT, lens, ls);
+            if (r > maxRadius) maxRadius = r;
+        }
+    }
+
+    float centerShift = std::sqrt(ls.centerShiftX * ls.centerShiftX + ls.centerShiftY * ls.centerShiftY);
+    float chromaMargin = absf(ls.latCA) * 0.30f + absf(ls.longCA) * 0.12f;
+    float frame = maxRadius * 1.10f + centerShift + chromaMargin + 0.035f;
+
+    return clampf(frame, 1.05f, 1.85f);
+}
+
 static float wavefrontPhase(float rho, float theta, const LocalLensState& ls, float spectralT)
 {
     float x = rho * std::cos(theta);
@@ -472,8 +507,9 @@ static Color evalBokeh(const BokehQuery& q, const LensModel& lens)
 {
     LocalLensState ls = buildLocalLensState(lens, q);
 
-    float x = q.u * 2.0f - 1.0f;
-    float y = q.v * 2.0f - 1.0f;
+    float frameScale = q.frameScale > 0.01f ? q.frameScale : 1.0f;
+    float x = (q.u * 2.0f - 1.0f) * frameScale;
+    float y = (q.v * 2.0f - 1.0f) * frameScale;
 
     x -= ls.centerShiftX;
     y -= ls.centerShiftY;
@@ -544,7 +580,6 @@ static Color evalBokeh(const BokehQuery& q, const LensModel& lens)
 
     float defectMask = saturate(c.a + (1.0f - smoothstep(0.98f, 1.05f, baseR)) * 0.25f);
 
-    // Bulles / poussières.
     for (int i = 0; i < BUBBLE_COUNT; ++i)
     {
         const Bubble& b = lens.bubbles[i];
@@ -587,7 +622,6 @@ static Color evalBokeh(const BokehQuery& q, const LensModel& lens)
         }
     }
 
-    // Blobs / taches.
     for (int i = 0; i < BLOB_COUNT; ++i)
     {
         const Blob& b = lens.blobs[i];
@@ -607,7 +641,6 @@ static Color evalBokeh(const BokehQuery& q, const LensModel& lens)
         c.b += g * defectMask * b.strength * 0.022f;
     }
 
-    // Scratches.
     for (int i = 0; i < SCRATCH_COUNT; ++i)
     {
         Scratch p = lens.scratches[i];
@@ -664,9 +697,14 @@ static void destroyKernel(BokehKernel& k)
 static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h, BokehKernel& out)
 {
     destroyKernel(out);
+
+    BokehQuery localQ = q;
+    if (localQ.frameScale <= 0.01f)
+        localQ.frameScale = estimateFrameScale(lens, localQ);
+
     out.w = w;
     out.h = h;
-    out.query = q;
+    out.query = localQ;
     out.values = new Color[(size_t)w * (size_t)h];
     out.pmf = new float[(size_t)w * (size_t)h];
     out.rowCdf = new float[(size_t)h];
@@ -677,7 +715,7 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
     {
         for (int x = 0; x < w; ++x)
         {
-            BokehQuery p = q;
+            BokehQuery p = localQ;
             p.u = ((float)x + 0.5f) / (float)w;
             p.v = ((float)y + 0.5f) / (float)h;
             Color c = evalBokeh(p, lens);
@@ -691,7 +729,6 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
     out.totalEnergy = (float)energy;
     out.normScale = energy > 1e-12 ? (float)((double)(w * h) / energy) : 1.0f;
 
-    // Normalise les valeurs pour avoir une moyenne de luminance proche de 1 sur le domaine.
     for (int i = 0; i < w * h; ++i)
     {
         out.values[i].r *= out.normScale;
@@ -700,12 +737,10 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
         out.pmf[i] *= out.normScale;
     }
 
-    // Recalcule l'énergie après normalisation.
     energy = 0.0;
     for (int i = 0; i < w * h; ++i) energy += out.pmf[i];
     out.totalEnergy = (float)energy;
 
-    // PMF discrète.
     if (out.totalEnergy > 1e-12f)
     {
         for (int i = 0; i < w * h; ++i) out.pmf[i] /= out.totalEnergy;
@@ -716,7 +751,6 @@ static void buildKernel(const LensModel& lens, const BokehQuery& q, int w, int h
         for (int i = 0; i < w * h; ++i) out.pmf[i] = uniform;
     }
 
-    // CDF par ligne + CDF conditionnelle par colonne.
     float accumRows = 0.0f;
     for (int y = 0; y < h; ++y)
     {
@@ -764,7 +798,7 @@ static float pdfBokeh(float u, float v, const BokehKernel& kernel)
     int x = (int)(clampf(u, 0.0f, 0.999999f) * (float)kernel.w);
     int y = (int)(clampf(v, 0.0f, 0.999999f) * (float)kernel.h);
     float pmf = kernel.pmf[(size_t)y * (size_t)kernel.w + (size_t)x];
-    return pmf * (float)(kernel.w * kernel.h); // pdf continue approx constante par pixel
+    return pmf * (float)(kernel.w * kernel.h);
 }
 
 static BokehSample sampleBokeh(float xi0, float xi1, const BokehKernel& kernel)
@@ -852,6 +886,7 @@ static void buildKernelBank(const LensModel& lens, KernelBank& bank)
         q.defocus  = sampleGridValue(d,  bank.defocusRes, bank.defocusMin, bank.defocusMax);
         q.aperture = sampleGridValue(a,  bank.apertureRes, bank.apertureMin, bank.apertureMax);
         q.focal    = sampleGridValue(f,  bank.focalRes, bank.focalMin, bank.focalMax);
+        q.frameScale = 0.0f;
 
         size_t idx = kernelBankFlatIndex(bank, fx, fy, d, a, f);
         buildKernel(lens, q, bank.kernelW, bank.kernelH, bank.kernels[idx]);
@@ -947,6 +982,7 @@ int main(int argc, char** argv)
     q.defocus = 0.75f;
     q.aperture = 0.95f;
     q.focal = 0.85f;
+    q.frameScale = 0.0f;
 
     BokehKernel kernel;
     initKernel(kernel);
